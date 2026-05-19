@@ -1,3 +1,4 @@
+//yardping/app/create/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -29,8 +30,6 @@ const categories = [
 
 type FormData = {
   title: string;
-  town: string;
-  addressArea: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -41,10 +40,20 @@ type FormData = {
   lemonadeStand: boolean;
 };
 
+type UserProfile = {
+  name?: string;
+  email?: string;
+  phone?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  province?: string;
+  country?: string;
+  postalCode?: string;
+};
+
 const emptyFormData: FormData = {
   title: "",
-  town: "",
-  addressArea: "",
   date: "",
   startTime: "",
   endTime: "",
@@ -56,9 +65,7 @@ const emptyFormData: FormData = {
 };
 
 function normalizeDateForInput(dateValue: string) {
-  if (!dateValue) {
-    return "";
-  }
+  if (!dateValue) return "";
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
     return dateValue;
@@ -75,9 +82,7 @@ function normalizeDateForInput(dateValue: string) {
 }
 
 function openNativePicker(input: HTMLInputElement | null) {
-  if (!input) {
-    return;
-  }
+  if (!input) return;
 
   input.focus();
 
@@ -100,32 +105,48 @@ function getTomorrowDateString() {
 }
 
 function isEndTimeAfterStartTime(startTime: string, endTime: string) {
-  if (!startTime || !endTime) {
-    return false;
-  }
+  if (!startTime || !endTime) return false;
 
   return endTime > startTime;
+}
+
+function isProfileComplete(profile: UserProfile | null) {
+  return Boolean(
+    profile?.phone &&
+      profile?.addressLine1 &&
+      profile?.city &&
+      profile?.province &&
+      profile?.country &&
+      profile?.postalCode
+  );
 }
 
 export default function CreatePage() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
+  const titleRef = useRef<HTMLInputElement | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const startTimeInputRef = useRef<HTMLInputElement | null>(null);
   const endTimeInputRef = useRef<HTMLInputElement | null>(null);
+  const pingRadiusRef = useRef<HTMLSelectElement | null>(null);
+  const rsvpCutoffRef = useRef<HTMLSelectElement | null>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
+  const categoriesRef = useRef<HTMLDivElement | null>(null);
 
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
-
   const isEditMode = Boolean(editId);
 
   const [formData, setFormData] = useState<FormData>(emptyFormData);
-  const [initialFormData, setInitialFormData] =
-    useState<FormData>(emptyFormData);
+  const [initialFormData, setInitialFormData] = useState<FormData>(emptyFormData);
+
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const [submitted, setSubmitted] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [missingField, setMissingField] = useState("");
   const [saving, setSaving] = useState(false);
   const [createdPingId, setCreatedPingId] = useState("");
   const [editLoading, setEditLoading] = useState(isEditMode);
@@ -135,6 +156,37 @@ export default function CreatePage() {
       router.push("/login");
     }
   }, [loading, user, router]);
+
+  useEffect(() => {
+    async function loadProfile() {
+      if (!user) {
+        setProfileLoading(false);
+        return;
+      }
+
+      try {
+        setProfileLoading(true);
+
+        const profileRef = doc(db, "users", user.uid);
+        const profileSnap = await getDoc(profileRef);
+
+        if (profileSnap.exists()) {
+          setProfile(profileSnap.data() as UserProfile);
+        } else {
+          setProfile(null);
+        }
+      } catch (error) {
+        console.error(error);
+        setProfile(null);
+      } finally {
+        setProfileLoading(false);
+      }
+    }
+
+    if (!loading) {
+      loadProfile();
+    }
+  }, [user, loading]);
 
   useEffect(() => {
     async function loadPingForEdit() {
@@ -164,8 +216,6 @@ export default function CreatePage() {
 
         const loadedFormData: FormData = {
           title: data.title || "",
-          town: data.town || "",
-          addressArea: data.addressArea || "",
           date: normalizeDateForInput(data.date || ""),
           startTime: data.startTime || "",
           endTime: data.endTime || "",
@@ -191,20 +241,121 @@ export default function CreatePage() {
     }
   }, [isEditMode, editId, user, loading]);
 
-  if (loading || editLoading) {
+  function focusField(ref: React.RefObject<HTMLElement | null>) {
+    ref.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+
+    setTimeout(() => {
+      ref.current?.focus();
+    }, 300);
+  }
+
+  function markMissing(fieldName: string, message: string, ref: React.RefObject<HTMLElement | null>) {
+    setMissingField(fieldName);
+    setErrorMessage(message);
+    setSubmitted(false);
+    focusField(ref);
+  }
+
+  function validateForm() {
+    if (!formData.title.trim()) {
+      markMissing("title", "Please enter a sale title.", titleRef);
+      return false;
+    }
+
+    if (!formData.date.trim()) {
+      markMissing("date", "Please choose a sale date.", dateInputRef);
+      return false;
+    }
+
+    if (formData.date < getTomorrowDateString()) {
+      markMissing("date", "Please choose a sale date from tomorrow onwards.", dateInputRef);
+      return false;
+    }
+
+    if (!formData.startTime) {
+      markMissing("startTime", "Please choose a start time.", startTimeInputRef);
+      return false;
+    }
+
+    if (!formData.endTime) {
+      markMissing("endTime", "Please choose an end time.", endTimeInputRef);
+      return false;
+    }
+
+    if (!isEndTimeAfterStartTime(formData.startTime, formData.endTime)) {
+      markMissing("endTime", "End time must be later than start time.", endTimeInputRef);
+      return false;
+    }
+
+    if (!formData.pingRadius) {
+      markMissing("pingRadius", "Please choose a ping radius.", pingRadiusRef);
+      return false;
+    }
+
+    if (!formData.rsvpCutoff) {
+      markMissing("rsvpCutoff", "Please choose an RSVP cutoff.", rsvpCutoffRef);
+      return false;
+    }
+
+    if (!formData.description.trim()) {
+      markMissing("description", "Please add a short description.", descriptionRef);
+      return false;
+    }
+
+    if (formData.selectedCategories.length === 0) {
+      markMissing("categories", "Please select at least one category.", categoriesRef);
+      return false;
+    }
+
+    setMissingField("");
+    setErrorMessage("");
+    return true;
+  }
+
+  if (loading || profileLoading || editLoading) {
     return (
       <main className="min-h-screen bg-gray-100 p-4">
         <div className="mx-auto max-w-md">
           <div className="rounded-lg bg-white p-4 text-sm text-gray-600 shadow">
-            {isEditMode ? "Loading Yard Ping..." : "Checking login status..."}
+            Loading...
           </div>
         </div>
       </main>
     );
   }
 
-  if (!user) {
-    return null;
+  if (!user) return null;
+
+  if (!isProfileComplete(profile)) {
+    return (
+      <main className="min-h-screen bg-gray-100 p-4">
+        <div className="mx-auto max-w-md">
+          <Link href="/" className="text-sm text-green-700">
+            ← Back to Yard Pings
+          </Link>
+
+          <div className="mt-4 rounded-lg bg-white p-4 shadow">
+            <h1 className="text-xl font-bold text-gray-950">
+              Complete your profile first
+            </h1>
+
+            <p className="mt-2 text-sm text-gray-600">
+              You need to add your phone number and address before creating a Yard Ping.
+            </p>
+
+            <button
+              onClick={() => router.push("/profile")}
+              className="mt-4 w-full rounded bg-green-500 px-4 py-3 font-semibold text-white"
+            >
+              Go to Profile
+            </button>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   function updateField(field: keyof FormData, value: string | boolean) {
@@ -216,6 +367,7 @@ export default function CreatePage() {
     setSubmitted(false);
     setCreatedPingId("");
     setErrorMessage("");
+    setMissingField("");
   }
 
   function toggleCategory(category: string) {
@@ -233,21 +385,7 @@ export default function CreatePage() {
     setSubmitted(false);
     setCreatedPingId("");
     setErrorMessage("");
-  }
-
-  function isFormComplete() {
-    return (
-      formData.title.trim() &&
-      formData.town.trim() &&
-      formData.addressArea.trim() &&
-      formData.date.trim() &&
-      formData.startTime &&
-      formData.endTime &&
-      formData.pingRadius &&
-      formData.rsvpCutoff &&
-      formData.description.trim() &&
-      formData.selectedCategories.length > 0
-    );
+    setMissingField("");
   }
 
   function hasFormChanged() {
@@ -257,23 +395,12 @@ export default function CreatePage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!isFormComplete()) {
-      setErrorMessage(
-        "Please fill in all required details and select at least one category."
-      );
-      setSubmitted(false);
+    if (!profile || !isProfileComplete(profile)) {
+      router.push("/profile");
       return;
     }
 
-    if (formData.date < getTomorrowDateString()) {
-      setErrorMessage("Please choose a sale date from tomorrow onwards.");
-      setSubmitted(false);
-      return;
-    }
-
-    if (!isEndTimeAfterStartTime(formData.startTime, formData.endTime)) {
-      setErrorMessage("End time must be later than start time.");
-      setSubmitted(false);
+    if (!validateForm()) {
       return;
     }
 
@@ -282,14 +409,15 @@ export default function CreatePage() {
         "You haven’t made any changes. Are you sure you wish to proceed?"
       );
 
-      if (!shouldProceed) {
-        return;
-      }
+      if (!shouldProceed) return;
     }
 
     setSaving(true);
     setSubmitted(false);
     setErrorMessage("");
+    setMissingField("");
+
+    const displayAddressArea = `${profile.city}, ${profile.province}`;
 
     try {
       if (isEditMode && editId) {
@@ -297,8 +425,18 @@ export default function CreatePage() {
 
         await updateDoc(pingRef, {
           title: formData.title.trim(),
-          town: formData.town.trim(),
-          addressArea: formData.addressArea.trim(),
+
+          addressLine1: profile.addressLine1,
+          addressLine2: profile.addressLine2 || "",
+          city: profile.city,
+          province: profile.province,
+          country: profile.country,
+          postalCode: profile.postalCode,
+          displayAddressArea,
+
+          town: profile.city,
+          addressArea: displayAddressArea,
+
           date: formData.date.trim(),
           startTime: formData.startTime,
           endTime: formData.endTime,
@@ -317,8 +455,18 @@ export default function CreatePage() {
 
       const docRef = await addDoc(collection(db, "yardPings"), {
         title: formData.title.trim(),
-        town: formData.town.trim(),
-        addressArea: formData.addressArea.trim(),
+
+        addressLine1: profile.addressLine1,
+        addressLine2: profile.addressLine2 || "",
+        city: profile.city,
+        province: profile.province,
+        country: profile.country,
+        postalCode: profile.postalCode,
+        displayAddressArea,
+
+        town: profile.city,
+        addressArea: displayAddressArea,
+
         date: formData.date.trim(),
         startTime: formData.startTime,
         endTime: formData.endTime,
@@ -330,7 +478,7 @@ export default function CreatePage() {
         interestedCount: 0,
         maybeCount: 0,
         createdBy: user.uid,
-        createdByName: user.displayName || user.email || "",
+        createdByName: profile.name || user.displayName || user.email || "",
         createdByEmail: user.email || "",
         status: "active",
         createdAt: serverTimestamp(),
@@ -365,6 +513,13 @@ export default function CreatePage() {
     );
   }
 
+  const inputClass = (fieldName: string) =>
+    `w-full rounded border p-3 ${
+      missingField === fieldName
+        ? "border-red-500 bg-red-50"
+        : "border-gray-300"
+    }`;
+
   return (
     <main className="min-h-screen bg-gray-100 p-4">
       <div className="mx-auto max-w-md">
@@ -392,30 +547,44 @@ export default function CreatePage() {
           className="space-y-4 rounded-lg bg-white p-4 shadow"
         >
           <input
+            ref={titleRef}
             type="text"
             value={formData.title}
             onChange={(event) => updateField("title", event.target.value)}
             placeholder="Sale title"
-            className="w-full rounded border p-3"
+            className={inputClass("title")}
           />
 
-          <input
-            type="text"
-            value={formData.town}
-            onChange={(event) => updateField("town", event.target.value)}
-            placeholder="Town / locality e.g. Simcoe"
-            className="w-full rounded border p-3"
-          />
+          <div className="rounded-lg border border-gray-300 bg-gray-50 p-3">
+            <p className="text-sm font-semibold text-gray-900">
+              Locked sale location
+            </p>
 
-          <input
-            type="text"
-            value={formData.addressArea}
-            onChange={(event) =>
-              updateField("addressArea", event.target.value)
-            }
-            placeholder="Address area e.g. Norfolk St S area"
-            className="w-full rounded border p-3"
-          />
+            <p className="mt-1 text-sm text-gray-700">
+              {profile.addressLine1}
+              {profile.addressLine2 ? `, ${profile.addressLine2}` : ""}
+            </p>
+
+            <p className="text-sm text-gray-700">
+              {profile.city}, {profile.province}
+            </p>
+
+            <p className="text-sm text-gray-700">
+              {profile.postalCode}, {profile.country}
+            </p>
+
+            <p className="mt-2 text-xs text-gray-500">
+              To change this location, update your profile address.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => router.push("/profile")}
+              className="mt-3 rounded border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900"
+            >
+              Edit Profile Address
+            </button>
+          </div>
 
           <div className="rounded-lg border bg-gray-50 p-3">
             <label className="mb-1 block text-sm font-semibold">
@@ -429,7 +598,9 @@ export default function CreatePage() {
                 value={formData.date}
                 min={getTomorrowDateString()}
                 onChange={(event) => updateField("date", event.target.value)}
-                className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-3 pr-12 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                className={`w-full rounded-lg border bg-white py-3 pl-3 pr-12 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100 ${
+                  missingField === "date" ? "border-red-500 bg-red-50" : "border-gray-300"
+                }`}
               />
 
               <button
@@ -475,7 +646,11 @@ export default function CreatePage() {
                     onChange={(event) =>
                       updateField("startTime", event.target.value)
                     }
-                    className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-3 pr-10 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                    className={`w-full rounded-lg border bg-white py-3 pl-3 pr-10 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100 ${
+                      missingField === "startTime"
+                        ? "border-red-500 bg-red-50"
+                        : "border-gray-300"
+                    }`}
                   />
 
                   <button
@@ -511,7 +686,11 @@ export default function CreatePage() {
                     onChange={(event) =>
                       updateField("endTime", event.target.value)
                     }
-                    className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-3 pr-10 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                    className={`w-full rounded-lg border bg-white py-3 pl-3 pr-10 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100 ${
+                      missingField === "endTime"
+                        ? "border-red-500 bg-red-50"
+                        : "border-gray-300"
+                    }`}
                   />
 
                   <button
@@ -545,11 +724,12 @@ export default function CreatePage() {
               Ping radius
             </label>
             <select
+              ref={pingRadiusRef}
               value={formData.pingRadius}
               onChange={(event) =>
                 updateField("pingRadius", event.target.value)
               }
-              className="w-full rounded border p-3"
+              className={inputClass("pingRadius")}
             >
               <option value="">Choose how far to advertise</option>
               <option value="2">Within 2 km</option>
@@ -568,11 +748,12 @@ export default function CreatePage() {
               RSVP cutoff
             </label>
             <select
+              ref={rsvpCutoffRef}
               value={formData.rsvpCutoff}
               onChange={(event) =>
                 updateField("rsvpCutoff", event.target.value)
               }
-              className="w-full rounded border p-3"
+              className={inputClass("rsvpCutoff")}
             >
               <option value="">Choose when RSVPs should close</option>
               <option value="event_start">Keep open until sale starts</option>
@@ -582,21 +763,29 @@ export default function CreatePage() {
               <option value="48_hours">Close 48 hours before sale</option>
             </select>
             <p className="mt-1 text-xs text-gray-500">
-              After this cutoff, visitors can still view the sale but cannot
-              RSVP.
+              After this cutoff, visitors can still view the sale but cannot RSVP.
             </p>
           </div>
 
           <textarea
+            ref={descriptionRef}
             value={formData.description}
             onChange={(event) =>
               updateField("description", event.target.value)
             }
             placeholder="Description — what kind of items are available?"
-            className="min-h-28 w-full rounded border p-3"
+            className={`min-h-28 ${inputClass("description")}`}
           />
 
-          <div>
+          <div
+            ref={categoriesRef}
+            tabIndex={-1}
+            className={
+              missingField === "categories"
+                ? "rounded border border-red-500 bg-red-50 p-3"
+                : ""
+            }
+          >
             <p className="mb-2 text-sm font-semibold">Categories</p>
 
             <div className="grid grid-cols-2 gap-2 text-sm">

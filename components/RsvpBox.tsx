@@ -1,3 +1,4 @@
+//yardping/components/RsvpBox.tsx
 "use client";
 
 import { useRouter } from "next/navigation";
@@ -36,21 +37,10 @@ function getRsvpCutoffTime(
 
   const cutoffTime = new Date(saleStart);
 
-  if (rsvpCutoff === "6_hours") {
-    cutoffTime.setHours(cutoffTime.getHours() - 6);
-  }
-
-  if (rsvpCutoff === "12_hours") {
-    cutoffTime.setHours(cutoffTime.getHours() - 12);
-  }
-
-  if (rsvpCutoff === "24_hours") {
-    cutoffTime.setHours(cutoffTime.getHours() - 24);
-  }
-
-  if (rsvpCutoff === "48_hours") {
-    cutoffTime.setHours(cutoffTime.getHours() - 48);
-  }
+  if (rsvpCutoff === "6_hours") cutoffTime.setHours(cutoffTime.getHours() - 6);
+  if (rsvpCutoff === "12_hours") cutoffTime.setHours(cutoffTime.getHours() - 12);
+  if (rsvpCutoff === "24_hours") cutoffTime.setHours(cutoffTime.getHours() - 24);
+  if (rsvpCutoff === "48_hours") cutoffTime.setHours(cutoffTime.getHours() - 48);
 
   return cutoffTime;
 }
@@ -84,6 +74,7 @@ export default function RsvpBox({
   const [noteLocked, setNoteLocked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [isOwner, setIsOwner] = useState(false);
 
   const cutoffTime = getRsvpCutoffTime(saleDate, startTime, rsvpCutoff);
   const rsvpClosed = cutoffTime ? new Date() >= cutoffTime : false;
@@ -95,6 +86,17 @@ export default function RsvpBox({
       }
 
       try {
+        const pingRef = doc(db, "yardPings", pingId);
+        const pingSnapshot = await getDoc(pingRef);
+
+        if (pingSnapshot.exists()) {
+          const pingData = pingSnapshot.data();
+
+          if (pingData.createdBy === user.uid) {
+            setIsOwner(true);
+          }
+        }
+
         const rsvpRef = doc(db, "rsvps", `${pingId}_${user.uid}`);
         const snapshot = await getDoc(rsvpRef);
 
@@ -123,8 +125,21 @@ export default function RsvpBox({
     return true;
   }
 
+  function blockOwnerRsvp() {
+    if (isOwner) {
+      alert("This is your own Yard Ping. You cannot RSVP to it.");
+      return true;
+    }
+
+    return false;
+  }
+
   function handleStatusChange(value: string) {
     if (!requireLogin()) {
+      return;
+    }
+
+    if (blockOwnerRsvp()) {
       return;
     }
 
@@ -144,6 +159,10 @@ export default function RsvpBox({
     }
 
     if (!user) {
+      return;
+    }
+
+    if (blockOwnerRsvp()) {
       return;
     }
 
@@ -253,6 +272,12 @@ export default function RsvpBox({
         note.
       </p>
 
+      {isOwner && (
+        <div className="mt-3 rounded bg-yellow-100 p-3 text-sm text-yellow-800">
+          This is your own Yard Ping. You cannot RSVP to it.
+        </div>
+      )}
+
       {rsvpClosed && (
         <div className="mt-3 rounded bg-red-100 p-3 text-sm text-red-800">
           RSVPs are closed for this Yard Ping. {formatCutoffMessage(cutoffTime)}
@@ -272,7 +297,7 @@ export default function RsvpBox({
             name="interestStatus"
             value="yes"
             checked={interestStatus === "yes"}
-            disabled={rsvpClosed}
+            disabled={rsvpClosed || isOwner}
             onChange={(event) => handleStatusChange(event.target.value)}
           />
           Yes, I’m interested
@@ -284,7 +309,7 @@ export default function RsvpBox({
             name="interestStatus"
             value="maybe"
             checked={interestStatus === "maybe"}
-            disabled={rsvpClosed}
+            disabled={rsvpClosed || isOwner}
             onChange={(event) => handleStatusChange(event.target.value)}
           />
           Maybe
@@ -295,7 +320,7 @@ export default function RsvpBox({
         <textarea
           value={note}
           maxLength={150}
-          disabled={noteLocked || rsvpClosed || (!loading && !user)}
+          disabled={noteLocked || rsvpClosed || isOwner || (!loading && !user)}
           onChange={(event) => {
             setNote(event.target.value);
             setSubmitted(false);
@@ -318,7 +343,7 @@ export default function RsvpBox({
       <button
         type="button"
         onClick={handleSubmit}
-        disabled={saving || rsvpClosed}
+        disabled={saving || rsvpClosed || isOwner}
         className="mt-3 w-full rounded bg-green-500 px-4 py-3 font-semibold text-white disabled:opacity-60"
       >
         {saving
@@ -334,7 +359,7 @@ export default function RsvpBox({
         </div>
       )}
 
-      {submitted && !errorMessage && !rsvpClosed && (
+      {submitted && !errorMessage && !rsvpClosed && !isOwner && (
         <div className="mt-3 rounded bg-green-100 p-3 text-sm text-green-800">
           {getConfirmationMessage()}
         </div>

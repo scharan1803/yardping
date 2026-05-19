@@ -2,17 +2,24 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { doc, getDoc, type DocumentData } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  serverTimestamp,
+  type DocumentData,
+} from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
+import { useAuth } from "@/lib/useAuth";
 import RsvpBox from "@/components/RsvpBox";
 import ShareButton from "@/components/ShareButton";
 
 type YardPing = {
   id: string;
   title: string;
-  town: string;
-  addressArea: string;
+  displayAddressArea: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -23,33 +30,28 @@ type YardPing = {
   rsvpCutoff: string;
   categories: string[];
   lemonadeStand: boolean;
+  createdBy: string;
 };
 
+const reportReasons = [
+  "Spam yard sale",
+  "Wrong information",
+  "Rude behaviour",
+  "Violence or unsafe situation",
+  "Other",
+];
+
 function formatRsvpCutoff(cutoff: string) {
-  if (cutoff === "event_start") {
-    return "Open until sale starts";
-  }
-
-  if (cutoff === "6_hours") {
-    return "Closes 6 hours before sale";
-  }
-
-  if (cutoff === "12_hours") {
-    return "Closes 12 hours before sale";
-  }
-
-  if (cutoff === "24_hours") {
-    return "Closes 24 hours before sale";
-  }
-
-  if (cutoff === "48_hours") {
-    return "Closes 48 hours before sale";
-  }
-
+  if (cutoff === "event_start") return "Open until sale starts";
+  if (cutoff === "6_hours") return "Closes 6 hours before sale";
+  if (cutoff === "12_hours") return "Closes 12 hours before sale";
+  if (cutoff === "24_hours") return "Closes 24 hours before sale";
+  if (cutoff === "48_hours") return "Closes 48 hours before sale";
   return "RSVP cutoff not set";
 }
 
 export default function PingDetailsPage() {
+  const { user } = useAuth();
   const params = useParams();
   const id = params.id as string;
 
@@ -58,12 +60,17 @@ export default function PingDetailsPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [inactiveMessage, setInactiveMessage] = useState("");
 
+  // report state
+  const [showReport, setShowReport] = useState(false);
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const [reporting, setReporting] = useState(false);
+  const [reportSuccess, setReportSuccess] = useState("");
+
   useEffect(() => {
     async function loadPing() {
       try {
         setLoading(true);
-        setErrorMessage("");
-        setInactiveMessage("");
 
         const docRef = doc(db, "yardPings", id);
         const snapshot = await getDoc(docRef);
@@ -76,7 +83,6 @@ export default function PingDetailsPage() {
         const data = snapshot.data() as DocumentData;
 
         if (data.status !== "active") {
-          setPing(null);
           setInactiveMessage("This Yard Ping is no longer active.");
           return;
         }
@@ -84,8 +90,9 @@ export default function PingDetailsPage() {
         setPing({
           id: snapshot.id,
           title: data.title || "",
-          town: data.town || "",
-          addressArea: data.addressArea || "",
+          displayAddressArea:
+            data.displayAddressArea ||
+            `${data.city || ""}, ${data.province || ""}`,
           date: data.date || "",
           startTime: data.startTime || "",
           endTime: data.endTime || "",
@@ -96,163 +103,84 @@ export default function PingDetailsPage() {
           rsvpCutoff: data.rsvpCutoff || "",
           categories: data.categories || [],
           lemonadeStand: data.lemonadeStand || false,
+          createdBy: data.createdBy || "",
         });
       } catch (error) {
         console.error(error);
-        setErrorMessage("Could not load this Yard Ping. Please try again.");
+        setErrorMessage("Could not load this Yard Ping.");
       } finally {
         setLoading(false);
       }
     }
 
-    if (id) {
-      loadPing();
-    }
+    if (id) loadPing();
   }, [id]);
 
-  if (loading) {
-    return (
-      <main className="min-h-screen bg-gray-100 p-4">
-        <div className="mx-auto max-w-md">
-          <Link href="/" className="text-sm text-green-700">
-            ← Back to Yard Pings
-          </Link>
+  async function handleReport() {
+    if (!user) {
+      alert("Please log in to report.");
+      return;
+    }
 
-          <div className="mt-4 rounded-lg bg-white p-4 text-sm text-gray-600 shadow">
-            Loading Yard Ping...
-          </div>
-        </div>
-      </main>
-    );
+    if (!reason) {
+      alert("Please select a reason.");
+      return;
+    }
+
+    if (!ping) return;
+
+    if (ping.createdBy === user.uid) {
+      alert("You cannot report your own Yard Ping.");
+      return;
+    }
+
+    try {
+      setReporting(true);
+
+      await addDoc(collection(db, "reports"), {
+        pingId: ping.id,
+        reportedBy: user.uid,
+        reason,
+        note,
+        createdAt: serverTimestamp(),
+      });
+
+      setReportSuccess("Report submitted successfully.");
+      setShowReport(false);
+      setReason("");
+      setNote("");
+    } catch (error) {
+      console.error(error);
+      alert("Failed to submit report.");
+    } finally {
+      setReporting(false);
+    }
   }
 
-  if (errorMessage) {
-    return (
-      <main className="min-h-screen bg-gray-100 p-4">
-        <div className="mx-auto max-w-md">
-          <Link href="/" className="text-sm text-green-700">
-            ← Back to Yard Pings
-          </Link>
-
-          <div className="mt-4 rounded bg-red-100 p-3 text-sm text-red-800">
-            {errorMessage}
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  if (inactiveMessage) {
-    return (
-      <main className="min-h-screen bg-gray-100 p-4">
-        <div className="mx-auto max-w-md">
-          <Link href="/" className="text-sm text-green-700">
-            ← Back to Yard Pings
-          </Link>
-
-          <section className="mt-4 rounded-lg bg-white p-4 shadow">
-            <h1 className="text-2xl font-bold">Yard Ping inactive</h1>
-            <p className="mt-2 text-gray-600">{inactiveMessage}</p>
-          </section>
-        </div>
-      </main>
-    );
-  }
-
-  if (!ping) {
-    return (
-      <main className="min-h-screen bg-gray-100 p-4">
-        <div className="mx-auto max-w-md">
-          <Link href="/" className="text-sm text-green-700">
-            ← Back to Yard Pings
-          </Link>
-
-          <h1 className="mt-4 text-2xl font-bold">Yard Ping not found</h1>
-          <p className="mt-2 text-gray-600">
-            This listing may have been removed or does not exist.
-          </p>
-        </div>
-      </main>
-    );
-  }
+  if (loading) return <div className="p-4">Loading...</div>;
+  if (errorMessage) return <div className="p-4 text-red-600">{errorMessage}</div>;
+  if (inactiveMessage) return <div className="p-4">{inactiveMessage}</div>;
+  if (!ping) return <div className="p-4">Not found</div>;
 
   return (
     <main className="min-h-screen bg-gray-100 p-4">
       <div className="mx-auto max-w-md">
         <Link href="/" className="text-sm text-green-700">
-          ← Back to Yard Pings
+          ← Back
         </Link>
 
         <section className="mt-4 rounded-lg bg-white p-4 shadow">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-green-700">
-                Yard Ping Details
-              </p>
+          <h1 className="text-2xl font-bold">{ping.title}</h1>
 
-              <h1 className="text-2xl font-bold">{ping.title}</h1>
-            </div>
-
-            {ping.lemonadeStand && (
-              <span className="rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-800">
-                🍋 Lemonade
-              </span>
-            )}
-          </div>
-
-          <p className="mt-3 text-gray-600">
-            {ping.town} • {ping.addressArea}
+          <p className="mt-2 text-gray-600">
+            📍 {ping.displayAddressArea}
           </p>
 
-          <p className="mt-1 text-gray-600">
+          <p className="text-gray-600">
             {ping.date} • {ping.startTime} - {ping.endTime}
           </p>
 
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div className="rounded bg-green-50 p-3">
-              <p className="text-xs text-gray-500">Interested</p>
-              <p className="text-xl font-bold text-green-700">
-                {ping.interestedCount}
-              </p>
-            </div>
-
-            <div className="rounded bg-yellow-50 p-3">
-              <p className="text-xs text-gray-500">Maybe</p>
-              <p className="text-xl font-bold text-yellow-700">
-                {ping.maybeCount}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <p className="text-sm font-semibold">Description</p>
-            <p className="text-sm text-gray-600">{ping.description}</p>
-          </div>
-
-          <div className="mt-4">
-            <p className="text-sm font-semibold">Reach</p>
-            <p className="text-sm text-gray-600">
-              Shown within {ping.pingRadiusKm} km
-            </p>
-          </div>
-
-          <div className="mt-4">
-            <p className="text-sm font-semibold">RSVP cutoff</p>
-            <p className="text-sm text-gray-600">
-              {formatRsvpCutoff(ping.rsvpCutoff)}
-            </p>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            {ping.categories.map((category) => (
-              <span
-                key={category}
-                className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700"
-              >
-                {category}
-              </span>
-            ))}
-          </div>
+          <p className="mt-4 text-sm text-gray-600">{ping.description}</p>
 
           <RsvpBox
             pingId={ping.id}
@@ -262,6 +190,51 @@ export default function PingDetailsPage() {
           />
 
           <ShareButton />
+
+          {/* REPORT BUTTON */}
+          {user && ping.createdBy !== user.uid && (
+            <button
+              onClick={() => setShowReport(!showReport)}
+              className="mt-4 w-full rounded border border-red-300 px-4 py-2 text-sm text-red-600"
+            >
+              Report this Yard Ping
+            </button>
+          )}
+
+          {/* REPORT FORM */}
+          {showReport && (
+            <div className="mt-3 rounded border p-3">
+              <select
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                className="w-full rounded border p-2"
+              >
+                <option value="">Select reason</option>
+                {reportReasons.map((r) => (
+                  <option key={r}>{r}</option>
+                ))}
+              </select>
+
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Optional note"
+                className="mt-2 w-full rounded border p-2"
+              />
+
+              <button
+                onClick={handleReport}
+                disabled={reporting}
+                className="mt-2 w-full rounded bg-red-500 px-4 py-2 text-white"
+              >
+                {reporting ? "Submitting..." : "Submit Report"}
+              </button>
+            </div>
+          )}
+
+          {reportSuccess && (
+            <p className="mt-3 text-sm text-green-600">{reportSuccess}</p>
+          )}
         </section>
       </div>
     </main>

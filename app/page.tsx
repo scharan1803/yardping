@@ -18,8 +18,7 @@ import YardPingCard from "@/components/YardPingCard";
 type YardPing = {
   id: string;
   title: string;
-  town: string;
-  addressArea: string;
+  displayAddressArea: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -56,8 +55,9 @@ export default function Home() {
           return {
             id: doc.id,
             title: data.title || "",
-            town: data.town || "",
-            addressArea: data.addressArea || "",
+            displayAddressArea:
+              data.displayAddressArea ||
+              `${data.city || ""}, ${data.province || ""}`,
             date: data.date || "",
             startTime: data.startTime || "",
             endTime: data.endTime || "",
@@ -90,14 +90,20 @@ export default function Home() {
         <div className="mb-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-bold">YardPing</h1>
+              <h1 className="text-2xl font-bold text-gray-950">YardPing</h1>
               <p className="mt-1 text-sm text-gray-600">
                 Local garage sales near you
               </p>
 
               {!loading && user && (
                 <p className="mt-2 text-xs text-gray-500">
-                  Signed in as {user.displayName || user.email}
+                  Signed in as{" "}
+                  <Link
+                    href="/profile"
+                    className="font-semibold text-green-700 underline underline-offset-2 hover:text-green-800"
+                  >
+                    {user.displayName || user.email}
+                  </Link>
                 </p>
               )}
             </div>
@@ -105,14 +111,14 @@ export default function Home() {
             {!loading && user ? (
               <button
                 onClick={handleSignOut}
-                className="rounded border border-gray-300 bg-white px-3 py-2 text-sm font-semibold"
+                className="rounded border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900"
               >
                 Sign out
               </button>
             ) : (
               <Link
                 href="/login"
-                className="rounded border border-gray-300 bg-white px-3 py-2 text-sm font-semibold"
+                className="rounded border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900"
               >
                 Log in
               </Link>
@@ -129,7 +135,7 @@ export default function Home() {
 
             <Link
               href="/manage"
-              className="rounded border border-gray-300 bg-white px-4 py-3 text-center font-semibold"
+              className="rounded border border-gray-300 bg-white px-4 py-3 text-center font-semibold text-gray-900"
             >
               Manage
             </Link>
@@ -167,8 +173,7 @@ export default function Home() {
               key={ping.id}
               id={ping.id}
               title={ping.title}
-              town={ping.town}
-              addressArea={ping.addressArea}
+              displayAddressArea={ping.displayAddressArea}
               date={ping.date}
               startTime={ping.startTime}
               endTime={ping.endTime}

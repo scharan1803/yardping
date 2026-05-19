@@ -3,8 +3,7 @@ import Link from "next/link";
 type YardPingCardProps = {
   id: string;
   title: string;
-  town: string;
-  addressArea: string;
+  displayAddressArea: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -17,8 +16,7 @@ type YardPingCardProps = {
 export default function YardPingCard({
   id,
   title,
-  town,
-  addressArea,
+  displayAddressArea,
   date,
   startTime,
   endTime,
@@ -33,9 +31,11 @@ export default function YardPingCard({
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">{title}</h2>
+
             <p className="mt-1 text-sm text-gray-600">
-              {town} • {addressArea}
+              📍 {displayAddressArea || "Location unavailable"}
             </p>
+
             <p className="mt-1 text-sm text-gray-600">
               {date} • {startTime} - {endTime}
             </p>

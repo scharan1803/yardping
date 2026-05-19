@@ -8,7 +8,6 @@ import {
   doc,
   getDocs,
   query,
-  serverTimestamp,
   updateDoc,
   where,
   type DocumentData,
@@ -21,6 +20,7 @@ type ManagedPing = {
   title: string;
   date: string;
   time: string;
+  address: string;
   interestedCount: number;
   maybeCount: number;
   notes: string[];
@@ -43,9 +43,7 @@ export default function ManagePage() {
 
   useEffect(() => {
     async function loadMyCreatedPings() {
-      if (!user) {
-        return;
-      }
+      if (!user) return;
 
       try {
         setPingsLoading(true);
@@ -57,11 +55,11 @@ export default function ManagePage() {
           where("status", "==", "active")
         );
 
-        const pingsSnapshot = await getDocs(pingsQuery);
+        const snapshot = await getDocs(pingsQuery);
 
-        const loadedPings = await Promise.all(
-          pingsSnapshot.docs.map(async (pingDoc) => {
-            const pingData = pingDoc.data() as DocumentData;
+        const loaded = await Promise.all(
+          snapshot.docs.map(async (pingDoc) => {
+            const data = pingDoc.data() as DocumentData;
 
             const rsvpsQuery = query(
               collection(db, "rsvps"),
@@ -71,190 +69,138 @@ export default function ManagePage() {
             const rsvpsSnapshot = await getDocs(rsvpsQuery);
 
             const notes = rsvpsSnapshot.docs
-              .map((rsvpDoc) => {
-                const rsvpData = rsvpDoc.data() as DocumentData;
-                return rsvpData.note || "";
-              })
-              .filter((note) => note.trim().length > 0);
+              .map((r) => r.data().note || "")
+              .filter((n) => n);
 
             return {
               id: pingDoc.id,
-              title: pingData.title || "",
-              date: pingData.date || "",
-              time: `${pingData.startTime || ""} - ${pingData.endTime || ""}`,
-              interestedCount: pingData.interestedCount || 0,
-              maybeCount: pingData.maybeCount || 0,
+              title: data.title || "",
+              date: data.date || "",
+              time: `${data.startTime || ""} - ${data.endTime || ""}`,
+              address: data.displayAddressArea || "Location unavailable",
+              interestedCount: data.interestedCount || 0,
+              maybeCount: data.maybeCount || 0,
               notes,
             };
           })
         );
 
-        setMyCreatedPings(loadedPings);
+        setMyCreatedPings(loaded);
       } catch (error) {
         console.error(error);
-        setErrorMessage("Could not load your Yard Pings. Please try again.");
+        setErrorMessage("Could not load your Yard Pings.");
       } finally {
         setPingsLoading(false);
       }
     }
 
-    if (user) {
+    if (!loading && user) {
       loadMyCreatedPings();
     }
-  }, [user]);
+  }, [user, loading]);
 
-  async function handleDeactivate(pingId: string) {
-    const shouldDeactivate = window.confirm(
-      "Are you sure you want to remove this Yard Ping from public view?"
-    );
-
-    if (!shouldDeactivate) {
-      return;
-    }
-
+  async function handleDeactivate(id: string) {
     try {
-      setDeactivatingId(pingId);
-      setErrorMessage("");
+      setDeactivatingId(id);
 
-      await updateDoc(doc(db, "yardPings", pingId), {
+      const ref = doc(db, "yardPings", id);
+      await updateDoc(ref, {
         status: "inactive",
-        updatedAt: serverTimestamp(),
       });
 
-      setMyCreatedPings((current) =>
-        current.filter((ping) => ping.id !== pingId)
-      );
+      setMyCreatedPings((prev) => prev.filter((p) => p.id !== id));
     } catch (error) {
       console.error(error);
-      setErrorMessage("Could not deactivate this Yard Ping. Please try again.");
+      alert("Failed to deactivate Yard Ping.");
     } finally {
       setDeactivatingId("");
     }
   }
 
-  if (loading) {
+  if (loading || pingsLoading) {
     return (
       <main className="min-h-screen bg-gray-100 p-4">
         <div className="mx-auto max-w-md">
-          <div className="rounded-lg bg-white p-4 text-sm text-gray-600 shadow">
-            Checking login status...
+          <div className="rounded bg-white p-4 text-sm text-gray-600 shadow">
+            Loading...
           </div>
         </div>
       </main>
     );
   }
 
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   return (
     <main className="min-h-screen bg-gray-100 p-4">
       <div className="mx-auto max-w-md">
-        <div className="mb-4">
-          <Link href="/" className="text-sm text-green-700">
-            ← Back to Yard Pings
-          </Link>
+        <Link href="/" className="text-sm text-green-700">
+          ← Back to Yard Pings
+        </Link>
 
-          <h1 className="mt-3 text-2xl font-bold">Manage Yard Pings</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            View your created Yard Pings, RSVP counts, and one-way notes.
-          </p>
-
-          <p className="mt-2 text-xs text-gray-500">
-            Managing as {user.displayName || user.email}
-          </p>
-        </div>
-
-        {pingsLoading && (
-          <div className="rounded-lg bg-white p-4 text-sm text-gray-600 shadow">
-            Loading your Yard Pings...
-          </div>
-        )}
+        <h1 className="mt-3 text-2xl font-bold">Manage Your Yard Pings</h1>
 
         {errorMessage && (
-          <div className="rounded bg-red-100 p-3 text-sm text-red-800">
+          <div className="mt-3 rounded bg-red-100 p-3 text-sm text-red-800">
             {errorMessage}
           </div>
         )}
 
-        {!pingsLoading && !errorMessage && myCreatedPings.length === 0 && (
-          <div className="rounded-lg bg-white p-4 text-sm text-gray-600 shadow">
+        {myCreatedPings.length === 0 && (
+          <div className="mt-4 rounded bg-white p-4 text-sm text-gray-600 shadow">
             You have no active Yard Pings.
           </div>
         )}
 
-        {!pingsLoading && !errorMessage && myCreatedPings.length > 0 && (
-          <div className="space-y-4">
-            {myCreatedPings.map((ping) => (
-              <section key={ping.id} className="rounded-lg bg-white p-4 shadow">
-                <div>
-                  <h2 className="text-lg font-semibold">{ping.title}</h2>
-                  <p className="mt-1 text-sm text-gray-600">
-                    {ping.date} • {ping.time}
-                  </p>
+        <div className="mt-4 space-y-4">
+          {myCreatedPings.map((ping) => (
+            <div key={ping.id} className="rounded-lg bg-white p-4 shadow">
+              <h2 className="text-lg font-semibold">{ping.title}</h2>
+
+              <p className="text-sm text-gray-600">
+                {ping.date} • {ping.time}
+              </p>
+
+              <p className="mt-1 text-sm text-gray-600">
+                📍 {ping.address}
+              </p>
+
+              <p className="mt-2 text-sm text-gray-700">
+                👍 {ping.interestedCount} interested • 🤔 {ping.maybeCount} maybe
+              </p>
+
+              {ping.notes.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-sm font-semibold">Visitor Notes</p>
+                  <ul className="mt-1 list-disc pl-4 text-sm text-gray-600">
+                    {ping.notes.map((note, i) => (
+                      <li key={i}>{note}</li>
+                    ))}
+                  </ul>
                 </div>
+              )}
 
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div className="rounded bg-green-50 p-3">
-                    <p className="text-xs text-gray-500">Interested</p>
-                    <p className="text-xl font-bold text-green-700">
-                      {ping.interestedCount}
-                    </p>
-                  </div>
+              <div className="mt-4 flex gap-2">
+                <Link
+                  href={`/create?edit=${ping.id}`}
+                  className="flex-1 rounded border border-gray-300 bg-white px-3 py-2 text-center text-sm font-semibold text-gray-900"
+                >
+                  Edit
+                </Link>
 
-                  <div className="rounded bg-yellow-50 p-3">
-                    <p className="text-xs text-gray-500">Maybe</p>
-                    <p className="text-xl font-bold text-yellow-700">
-                      {ping.maybeCount}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <p className="text-sm font-semibold">Notes from visitors</p>
-
-                  {ping.notes.length === 0 ? (
-                    <p className="mt-2 rounded border bg-gray-50 p-3 text-sm text-gray-500">
-                      No notes yet.
-                    </p>
-                  ) : (
-                    <div className="mt-2 space-y-2">
-                      {ping.notes.map((note, index) => (
-                        <p
-                          key={index}
-                          className="rounded border bg-gray-50 p-3 text-sm text-gray-700"
-                        >
-                          {note}
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 grid grid-cols-1 gap-2">
-                  <Link
-                    href={`/create?edit=${ping.id}`}
-                    className="block w-full rounded border border-gray-300 px-4 py-3 text-center font-semibold"
-                  >
-                    Edit Yard Ping
-                  </Link>
-
-                  <button
-                    type="button"
-                    disabled={deactivatingId === ping.id}
-                    onClick={() => handleDeactivate(ping.id)}
-                    className="w-full rounded border border-red-300 bg-red-50 px-4 py-3 text-center font-semibold text-red-700 disabled:opacity-60"
-                  >
-                    {deactivatingId === ping.id
-                      ? "Deactivating..."
-                      : "Deactivate Yard Ping"}
-                  </button>
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
+                <button
+                  onClick={() => handleDeactivate(ping.id)}
+                  disabled={deactivatingId === ping.id}
+                  className="flex-1 rounded bg-red-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {deactivatingId === ping.id
+                    ? "Deactivating..."
+                    : "Deactivate"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </main>
   );
