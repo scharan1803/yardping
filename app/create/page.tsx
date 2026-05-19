@@ -1,4 +1,3 @@
-//yardping/app/create/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -44,12 +43,17 @@ type UserProfile = {
   name?: string;
   email?: string;
   phone?: string;
+  formattedAddress?: string;
   addressLine1?: string;
   addressLine2?: string;
   city?: string;
   province?: string;
   country?: string;
   postalCode?: string;
+  lat?: number;
+  lng?: number;
+  placeId?: string;
+  addressVerified?: boolean;
 };
 
 const emptyFormData: FormData = {
@@ -113,11 +117,16 @@ function isEndTimeAfterStartTime(startTime: string, endTime: string) {
 function isProfileComplete(profile: UserProfile | null) {
   return Boolean(
     profile?.phone &&
+      profile?.formattedAddress &&
       profile?.addressLine1 &&
       profile?.city &&
       profile?.province &&
       profile?.country &&
-      profile?.postalCode
+      profile?.postalCode &&
+      typeof profile?.lat === "number" &&
+      typeof profile?.lng === "number" &&
+      profile?.placeId &&
+      profile?.addressVerified
   );
 }
 
@@ -125,14 +134,9 @@ export default function CreatePage() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
-  const titleRef = useRef<HTMLInputElement | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const startTimeInputRef = useRef<HTMLInputElement | null>(null);
   const endTimeInputRef = useRef<HTMLInputElement | null>(null);
-  const pingRadiusRef = useRef<HTMLSelectElement | null>(null);
-  const rsvpCutoffRef = useRef<HTMLSelectElement | null>(null);
-  const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
-  const categoriesRef = useRef<HTMLDivElement | null>(null);
 
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
@@ -146,7 +150,6 @@ export default function CreatePage() {
 
   const [submitted, setSubmitted] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [missingField, setMissingField] = useState("");
   const [saving, setSaving] = useState(false);
   const [createdPingId, setCreatedPingId] = useState("");
   const [editLoading, setEditLoading] = useState(isEditMode);
@@ -241,80 +244,6 @@ export default function CreatePage() {
     }
   }, [isEditMode, editId, user, loading]);
 
-  function focusField(ref: React.RefObject<HTMLElement | null>) {
-    ref.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    });
-
-    setTimeout(() => {
-      ref.current?.focus();
-    }, 300);
-  }
-
-  function markMissing(fieldName: string, message: string, ref: React.RefObject<HTMLElement | null>) {
-    setMissingField(fieldName);
-    setErrorMessage(message);
-    setSubmitted(false);
-    focusField(ref);
-  }
-
-  function validateForm() {
-    if (!formData.title.trim()) {
-      markMissing("title", "Please enter a sale title.", titleRef);
-      return false;
-    }
-
-    if (!formData.date.trim()) {
-      markMissing("date", "Please choose a sale date.", dateInputRef);
-      return false;
-    }
-
-    if (formData.date < getTomorrowDateString()) {
-      markMissing("date", "Please choose a sale date from tomorrow onwards.", dateInputRef);
-      return false;
-    }
-
-    if (!formData.startTime) {
-      markMissing("startTime", "Please choose a start time.", startTimeInputRef);
-      return false;
-    }
-
-    if (!formData.endTime) {
-      markMissing("endTime", "Please choose an end time.", endTimeInputRef);
-      return false;
-    }
-
-    if (!isEndTimeAfterStartTime(formData.startTime, formData.endTime)) {
-      markMissing("endTime", "End time must be later than start time.", endTimeInputRef);
-      return false;
-    }
-
-    if (!formData.pingRadius) {
-      markMissing("pingRadius", "Please choose a ping radius.", pingRadiusRef);
-      return false;
-    }
-
-    if (!formData.rsvpCutoff) {
-      markMissing("rsvpCutoff", "Please choose an RSVP cutoff.", rsvpCutoffRef);
-      return false;
-    }
-
-    if (!formData.description.trim()) {
-      markMissing("description", "Please add a short description.", descriptionRef);
-      return false;
-    }
-
-    if (formData.selectedCategories.length === 0) {
-      markMissing("categories", "Please select at least one category.", categoriesRef);
-      return false;
-    }
-
-    setMissingField("");
-    setErrorMessage("");
-    return true;
-  }
-
   if (loading || profileLoading || editLoading) {
     return (
       <main className="min-h-screen bg-gray-100 p-4">
@@ -367,7 +296,6 @@ export default function CreatePage() {
     setSubmitted(false);
     setCreatedPingId("");
     setErrorMessage("");
-    setMissingField("");
   }
 
   function toggleCategory(category: string) {
@@ -385,7 +313,19 @@ export default function CreatePage() {
     setSubmitted(false);
     setCreatedPingId("");
     setErrorMessage("");
-    setMissingField("");
+  }
+
+  function isFormComplete() {
+    return (
+      formData.title.trim() &&
+      formData.date.trim() &&
+      formData.startTime &&
+      formData.endTime &&
+      formData.pingRadius &&
+      formData.rsvpCutoff &&
+      formData.description.trim() &&
+      formData.selectedCategories.length > 0
+    );
   }
 
   function hasFormChanged() {
@@ -400,7 +340,23 @@ export default function CreatePage() {
       return;
     }
 
-    if (!validateForm()) {
+    if (!isFormComplete()) {
+      setErrorMessage(
+        "Please fill in all required details and select at least one category."
+      );
+      setSubmitted(false);
+      return;
+    }
+
+    if (formData.date < getTomorrowDateString()) {
+      setErrorMessage("Please choose a sale date from tomorrow onwards.");
+      setSubmitted(false);
+      return;
+    }
+
+    if (!isEndTimeAfterStartTime(formData.startTime, formData.endTime)) {
+      setErrorMessage("End time must be later than start time.");
+      setSubmitted(false);
       return;
     }
 
@@ -415,7 +371,6 @@ export default function CreatePage() {
     setSaving(true);
     setSubmitted(false);
     setErrorMessage("");
-    setMissingField("");
 
     const displayAddressArea = `${profile.city}, ${profile.province}`;
 
@@ -426,12 +381,17 @@ export default function CreatePage() {
         await updateDoc(pingRef, {
           title: formData.title.trim(),
 
+          formattedAddress: profile.formattedAddress,
           addressLine1: profile.addressLine1,
           addressLine2: profile.addressLine2 || "",
           city: profile.city,
           province: profile.province,
           country: profile.country,
           postalCode: profile.postalCode,
+          lat: profile.lat,
+          lng: profile.lng,
+          placeId: profile.placeId,
+          addressVerified: true,
           displayAddressArea,
 
           town: profile.city,
@@ -456,12 +416,17 @@ export default function CreatePage() {
       const docRef = await addDoc(collection(db, "yardPings"), {
         title: formData.title.trim(),
 
+        formattedAddress: profile.formattedAddress,
         addressLine1: profile.addressLine1,
         addressLine2: profile.addressLine2 || "",
         city: profile.city,
         province: profile.province,
         country: profile.country,
         postalCode: profile.postalCode,
+        lat: profile.lat,
+        lng: profile.lng,
+        placeId: profile.placeId,
+        addressVerified: true,
         displayAddressArea,
 
         town: profile.city,
@@ -513,13 +478,6 @@ export default function CreatePage() {
     );
   }
 
-  const inputClass = (fieldName: string) =>
-    `w-full rounded border p-3 ${
-      missingField === fieldName
-        ? "border-red-500 bg-red-50"
-        : "border-gray-300"
-    }`;
-
   return (
     <main className="min-h-screen bg-gray-100 p-4">
       <div className="mx-auto max-w-md">
@@ -547,12 +505,11 @@ export default function CreatePage() {
           className="space-y-4 rounded-lg bg-white p-4 shadow"
         >
           <input
-            ref={titleRef}
             type="text"
             value={formData.title}
             onChange={(event) => updateField("title", event.target.value)}
             placeholder="Sale title"
-            className={inputClass("title")}
+            className="w-full rounded border p-3"
           />
 
           <div className="rounded-lg border border-gray-300 bg-gray-50 p-3">
@@ -598,9 +555,7 @@ export default function CreatePage() {
                 value={formData.date}
                 min={getTomorrowDateString()}
                 onChange={(event) => updateField("date", event.target.value)}
-                className={`w-full rounded-lg border bg-white py-3 pl-3 pr-12 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100 ${
-                  missingField === "date" ? "border-red-500 bg-red-50" : "border-gray-300"
-                }`}
+                className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-3 pr-12 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
               />
 
               <button
@@ -646,11 +601,7 @@ export default function CreatePage() {
                     onChange={(event) =>
                       updateField("startTime", event.target.value)
                     }
-                    className={`w-full rounded-lg border bg-white py-3 pl-3 pr-10 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100 ${
-                      missingField === "startTime"
-                        ? "border-red-500 bg-red-50"
-                        : "border-gray-300"
-                    }`}
+                    className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-3 pr-10 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
                   />
 
                   <button
@@ -686,11 +637,7 @@ export default function CreatePage() {
                     onChange={(event) =>
                       updateField("endTime", event.target.value)
                     }
-                    className={`w-full rounded-lg border bg-white py-3 pl-3 pr-10 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100 ${
-                      missingField === "endTime"
-                        ? "border-red-500 bg-red-50"
-                        : "border-gray-300"
-                    }`}
+                    className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-3 pr-10 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
                   />
 
                   <button
@@ -724,12 +671,11 @@ export default function CreatePage() {
               Ping radius
             </label>
             <select
-              ref={pingRadiusRef}
               value={formData.pingRadius}
               onChange={(event) =>
                 updateField("pingRadius", event.target.value)
               }
-              className={inputClass("pingRadius")}
+              className="w-full rounded border p-3"
             >
               <option value="">Choose how far to advertise</option>
               <option value="2">Within 2 km</option>
@@ -748,12 +694,11 @@ export default function CreatePage() {
               RSVP cutoff
             </label>
             <select
-              ref={rsvpCutoffRef}
               value={formData.rsvpCutoff}
               onChange={(event) =>
                 updateField("rsvpCutoff", event.target.value)
               }
-              className={inputClass("rsvpCutoff")}
+              className="w-full rounded border p-3"
             >
               <option value="">Choose when RSVPs should close</option>
               <option value="event_start">Keep open until sale starts</option>
@@ -768,24 +713,15 @@ export default function CreatePage() {
           </div>
 
           <textarea
-            ref={descriptionRef}
             value={formData.description}
             onChange={(event) =>
               updateField("description", event.target.value)
             }
             placeholder="Description — what kind of items are available?"
-            className={`min-h-28 ${inputClass("description")}`}
+            className="min-h-28 w-full rounded border p-3"
           />
 
-          <div
-            ref={categoriesRef}
-            tabIndex={-1}
-            className={
-              missingField === "categories"
-                ? "rounded border border-red-500 bg-red-50 p-3"
-                : ""
-            }
-          >
+          <div>
             <p className="mb-2 text-sm font-semibold">Categories</p>
 
             <div className="grid grid-cols-2 gap-2 text-sm">
