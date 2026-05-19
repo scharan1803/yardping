@@ -1,8 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState, type FormEvent } from "react";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  serverTimestamp,
+  updateDoc,
+  type DocumentData,
+} from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useAuth } from "@/lib/useAuth";
 
 const categories = [
   "Electronics",
@@ -44,32 +55,101 @@ const emptyFormData: FormData = {
   lemonadeStand: false,
 };
 
-const mockEditFormData: FormData = {
-  title: "Weekend Garage Sale",
-  town: "Simcoe",
-  addressArea: "Norfolk St S area",
-  date: "06/22/2026",
-  startTime: "09:00",
-  endTime: "14:00",
-  pingRadius: "10",
-  rsvpCutoff: "24_hours",
-  description:
-    "Family garage sale with home items, small electronics, kids toys, and a few furniture pieces.",
-  selectedCategories: ["Electronics", "Furniture", "Kids"],
-  lemonadeStand: true,
-};
-
 export default function CreatePage() {
+  const router = useRouter();
+  const { user, loading } = useAuth();
+
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
 
   const isEditMode = Boolean(editId);
 
-  const initialFormData = isEditMode ? mockEditFormData : emptyFormData;
+  const [formData, setFormData] = useState<FormData>(emptyFormData);
+  const [initialFormData, setInitialFormData] =
+    useState<FormData>(emptyFormData);
 
-  const [formData, setFormData] = useState<FormData>(initialFormData);
   const [submitted, setSubmitted] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [createdPingId, setCreatedPingId] = useState("");
+  const [editLoading, setEditLoading] = useState(isEditMode);
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push("/login");
+    }
+  }, [loading, user, router]);
+
+  useEffect(() => {
+    async function loadPingForEdit() {
+      if (!isEditMode || !editId || !user) {
+        setEditLoading(false);
+        return;
+      }
+
+      try {
+        setEditLoading(true);
+        setErrorMessage("");
+
+        const pingRef = doc(db, "yardPings", editId);
+        const snapshot = await getDoc(pingRef);
+
+        if (!snapshot.exists()) {
+          setErrorMessage("This Yard Ping does not exist.");
+          return;
+        }
+
+        const data = snapshot.data() as DocumentData;
+
+        if (data.createdBy !== user.uid) {
+          setErrorMessage("You can only edit Yard Pings created by you.");
+          return;
+        }
+
+        const loadedFormData: FormData = {
+          title: data.title || "",
+          town: data.town || "",
+          addressArea: data.addressArea || "",
+          date: data.date || "",
+          startTime: data.startTime || "",
+          endTime: data.endTime || "",
+          pingRadius: String(data.pingRadiusKm || ""),
+          rsvpCutoff: data.rsvpCutoff || "",
+          description: data.description || "",
+          selectedCategories: data.categories || [],
+          lemonadeStand: Boolean(data.lemonadeStand),
+        };
+
+        setFormData(loadedFormData);
+        setInitialFormData(loadedFormData);
+      } catch (error) {
+        console.error(error);
+        setErrorMessage("Could not load this Yard Ping for editing.");
+      } finally {
+        setEditLoading(false);
+      }
+    }
+
+    if (!loading && user) {
+      loadPingForEdit();
+    }
+  }, [isEditMode, editId, user, loading]);
+
+  if (loading || editLoading) {
+    return (
+      <main className="min-h-screen bg-gray-100 p-4">
+        <div className="mx-auto max-w-md">
+          <div className="rounded-lg bg-white p-4 text-sm text-gray-600 shadow">
+            {isEditMode ? "Loading Yard Ping..." : "Checking login status..."}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
 
   function updateField(field: keyof FormData, value: string | boolean) {
     setFormData((current) => ({
@@ -78,6 +158,7 @@ export default function CreatePage() {
     }));
 
     setSubmitted(false);
+    setCreatedPingId("");
     setErrorMessage("");
   }
 
@@ -94,6 +175,7 @@ export default function CreatePage() {
     });
 
     setSubmitted(false);
+    setCreatedPingId("");
     setErrorMessage("");
   }
 
@@ -116,7 +198,7 @@ export default function CreatePage() {
     return JSON.stringify(formData) !== JSON.stringify(initialFormData);
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!isFormComplete()) {
@@ -137,8 +219,82 @@ export default function CreatePage() {
       }
     }
 
-    setSubmitted(true);
+    setSaving(true);
+    setSubmitted(false);
     setErrorMessage("");
+
+    try {
+      if (isEditMode && editId) {
+        const pingRef = doc(db, "yardPings", editId);
+
+        await updateDoc(pingRef, {
+          title: formData.title.trim(),
+          town: formData.town.trim(),
+          addressArea: formData.addressArea.trim(),
+          date: formData.date.trim(),
+          startTime: formData.startTime,
+          endTime: formData.endTime,
+          pingRadiusKm: Number(formData.pingRadius),
+          rsvpCutoff: formData.rsvpCutoff,
+          description: formData.description.trim(),
+          categories: formData.selectedCategories,
+          lemonadeStand: formData.lemonadeStand,
+          updatedAt: serverTimestamp(),
+        });
+
+        setInitialFormData(formData);
+        setSubmitted(true);
+        return;
+      }
+
+      const docRef = await addDoc(collection(db, "yardPings"), {
+        title: formData.title.trim(),
+        town: formData.town.trim(),
+        addressArea: formData.addressArea.trim(),
+        date: formData.date.trim(),
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        pingRadiusKm: Number(formData.pingRadius),
+        rsvpCutoff: formData.rsvpCutoff,
+        description: formData.description.trim(),
+        categories: formData.selectedCategories,
+        lemonadeStand: formData.lemonadeStand,
+        interestedCount: 0,
+        maybeCount: 0,
+        createdBy: user.uid,
+        createdByName: user.displayName || user.email || "",
+        createdByEmail: user.email || "",
+        status: "active",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      setCreatedPingId(docRef.id);
+      setSubmitted(true);
+      setFormData(emptyFormData);
+      setInitialFormData(emptyFormData);
+    } catch (error) {
+      console.error(error);
+      setErrorMessage("Could not save your Yard Ping. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (errorMessage && isEditMode && !formData.title) {
+    return (
+      <main className="min-h-screen bg-gray-100 p-4">
+        <div className="mx-auto max-w-md">
+          <Link href="/manage" className="text-sm text-green-700">
+            ← Back to Manage
+          </Link>
+
+          <div className="mt-4 rounded bg-red-100 p-3 text-sm text-red-800">
+            {errorMessage}
+          </div>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -278,7 +434,8 @@ export default function CreatePage() {
               <option value="48_hours">Close 48 hours before sale</option>
             </select>
             <p className="mt-1 text-xs text-gray-500">
-              After this cutoff, visitors can still view the sale but cannot RSVP.
+              After this cutoff, visitors can still view the sale but cannot
+              RSVP.
             </p>
           </div>
 
@@ -322,8 +479,15 @@ export default function CreatePage() {
             🍋 Lemonade stand available
           </label>
 
-          <button className="w-full rounded bg-green-500 px-4 py-3 font-semibold text-white">
-            {isEditMode ? "Update Yard Ping" : "Create Yard Ping"}
+          <button
+            disabled={saving}
+            className="w-full rounded bg-green-500 px-4 py-3 font-semibold text-white disabled:opacity-60"
+          >
+            {saving
+              ? "Saving..."
+              : isEditMode
+              ? "Update Yard Ping"
+              : "Create Yard Ping"}
           </button>
 
           {errorMessage && (
@@ -335,8 +499,8 @@ export default function CreatePage() {
           {submitted && (
             <div className="rounded bg-green-100 p-3 text-sm text-green-800">
               {isEditMode
-                ? "Your Yard Ping update has been prepared. Firebase will save this later."
-                : "Your Yard Ping has been prepared. Firebase will publish this later."}
+                ? "Your Yard Ping has been updated successfully."
+                : `Your Yard Ping has been published successfully. ID: ${createdPingId}`}
             </div>
           )}
         </form>

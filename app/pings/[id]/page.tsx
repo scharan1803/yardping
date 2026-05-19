@@ -1,12 +1,28 @@
+"use client";
+
 import Link from "next/link";
-import { mockPings } from "@/data/mockPings";
+import { useParams } from "next/navigation";
+import { doc, getDoc, type DocumentData } from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { db } from "@/lib/firebase";
 import RsvpBox from "@/components/RsvpBox";
 import ShareButton from "@/components/ShareButton";
 
-type PageProps = {
-  params: Promise<{
-    id: string;
-  }>;
+type YardPing = {
+  id: string;
+  title: string;
+  town: string;
+  addressArea: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  interestedCount: number;
+  maybeCount: number;
+  description: string;
+  pingRadiusKm: number;
+  rsvpCutoff: string;
+  categories: string[];
+  lemonadeStand: boolean;
 };
 
 function formatRsvpCutoff(cutoff: string) {
@@ -33,10 +49,115 @@ function formatRsvpCutoff(cutoff: string) {
   return "RSVP cutoff not set";
 }
 
-export default async function PingDetailsPage({ params }: PageProps) {
-  const { id } = await params;
+export default function PingDetailsPage() {
+  const params = useParams();
+  const id = params.id as string;
 
-  const ping = mockPings.find((item) => item.id === id);
+  const [ping, setPing] = useState<YardPing | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [inactiveMessage, setInactiveMessage] = useState("");
+
+  useEffect(() => {
+    async function loadPing() {
+      try {
+        setLoading(true);
+        setErrorMessage("");
+        setInactiveMessage("");
+
+        const docRef = doc(db, "yardPings", id);
+        const snapshot = await getDoc(docRef);
+
+        if (!snapshot.exists()) {
+          setPing(null);
+          return;
+        }
+
+        const data = snapshot.data() as DocumentData;
+
+        if (data.status !== "active") {
+          setPing(null);
+          setInactiveMessage("This Yard Ping is no longer active.");
+          return;
+        }
+
+        setPing({
+          id: snapshot.id,
+          title: data.title || "",
+          town: data.town || "",
+          addressArea: data.addressArea || "",
+          date: data.date || "",
+          startTime: data.startTime || "",
+          endTime: data.endTime || "",
+          interestedCount: data.interestedCount || 0,
+          maybeCount: data.maybeCount || 0,
+          description: data.description || "",
+          pingRadiusKm: data.pingRadiusKm || 0,
+          rsvpCutoff: data.rsvpCutoff || "",
+          categories: data.categories || [],
+          lemonadeStand: data.lemonadeStand || false,
+        });
+      } catch (error) {
+        console.error(error);
+        setErrorMessage("Could not load this Yard Ping. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (id) {
+      loadPing();
+    }
+  }, [id]);
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-gray-100 p-4">
+        <div className="mx-auto max-w-md">
+          <Link href="/" className="text-sm text-green-700">
+            ← Back to Yard Pings
+          </Link>
+
+          <div className="mt-4 rounded-lg bg-white p-4 text-sm text-gray-600 shadow">
+            Loading Yard Ping...
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <main className="min-h-screen bg-gray-100 p-4">
+        <div className="mx-auto max-w-md">
+          <Link href="/" className="text-sm text-green-700">
+            ← Back to Yard Pings
+          </Link>
+
+          <div className="mt-4 rounded bg-red-100 p-3 text-sm text-red-800">
+            {errorMessage}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (inactiveMessage) {
+    return (
+      <main className="min-h-screen bg-gray-100 p-4">
+        <div className="mx-auto max-w-md">
+          <Link href="/" className="text-sm text-green-700">
+            ← Back to Yard Pings
+          </Link>
+
+          <section className="mt-4 rounded-lg bg-white p-4 shadow">
+            <h1 className="text-2xl font-bold">Yard Ping inactive</h1>
+            <p className="mt-2 text-gray-600">{inactiveMessage}</p>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   if (!ping) {
     return (
@@ -133,7 +254,7 @@ export default async function PingDetailsPage({ params }: PageProps) {
             ))}
           </div>
 
-          <RsvpBox />
+          <RsvpBox pingId={ping.id} />
 
           <ShareButton />
         </section>

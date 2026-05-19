@@ -1,23 +1,164 @@
 "use client";
 
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import {
+  doc,
+  getDoc,
+  increment,
+  runTransaction,
+  serverTimestamp,
+} from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useAuth } from "@/lib/useAuth";
 
-export default function RsvpBox() {
+type RsvpBoxProps = {
+  pingId: string;
+};
+
+export default function RsvpBox({ pingId }: RsvpBoxProps) {
+  const router = useRouter();
+  const { user, loading } = useAuth();
+
   const [interestStatus, setInterestStatus] = useState("");
   const [note, setNote] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [noteLocked, setNoteLocked] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  function handleSubmit() {
+  useEffect(() => {
+    async function loadExistingRsvp() {
+      if (!user || !pingId) {
+        return;
+      }
+
+      try {
+        const rsvpRef = doc(db, "rsvps", `${pingId}_${user.uid}`);
+        const snapshot = await getDoc(rsvpRef);
+
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+
+          setInterestStatus(data.status || "");
+          setNote(data.note || "");
+          setNoteLocked(Boolean(data.noteLocked));
+          setSubmitted(true);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    loadExistingRsvp();
+  }, [user, pingId]);
+
+  function requireLogin() {
+    if (!loading && !user) {
+      router.push("/login");
+      return false;
+    }
+
+    return true;
+  }
+
+  function handleStatusChange(value: string) {
+    if (!requireLogin()) {
+      return;
+    }
+
+    setInterestStatus(value);
+    setSubmitted(false);
+    setErrorMessage("");
+  }
+
+  async function handleSubmit() {
+    if (!requireLogin()) {
+      return;
+    }
+
+    if (!user) {
+      return;
+    }
+
     if (!interestStatus) {
       alert("Please choose Yes or Maybe before submitting.");
       return;
     }
 
-    setSubmitted(true);
+    setSaving(true);
+    setErrorMessage("");
 
-    if (note.trim().length > 0) {
-      setNoteLocked(true);
+    try {
+      const pingRef = doc(db, "yardPings", pingId);
+      const rsvpRef = doc(db, "rsvps", `${pingId}_${user.uid}`);
+
+      await runTransaction(db, async (transaction) => {
+        const existingRsvpSnapshot = await transaction.get(rsvpRef);
+        const existingRsvp = existingRsvpSnapshot.exists()
+          ? existingRsvpSnapshot.data()
+          : null;
+
+        const previousStatus = existingRsvp?.status || "";
+        const existingNoteLocked = Boolean(existingRsvp?.noteLocked);
+
+        let interestedDelta = 0;
+        let maybeDelta = 0;
+
+        if (!previousStatus && interestStatus === "yes") {
+          interestedDelta = 1;
+        }
+
+        if (!previousStatus && interestStatus === "maybe") {
+          maybeDelta = 1;
+        }
+
+        if (previousStatus === "yes" && interestStatus === "maybe") {
+          interestedDelta = -1;
+          maybeDelta = 1;
+        }
+
+        if (previousStatus === "maybe" && interestStatus === "yes") {
+          maybeDelta = -1;
+          interestedDelta = 1;
+        }
+
+        const cleanNote = note.trim();
+        const shouldSaveNote = cleanNote.length > 0 && !existingNoteLocked;
+
+        transaction.set(
+          rsvpRef,
+          {
+            pingId,
+            userId: user.uid,
+            userName: user.displayName || user.email || "",
+            userEmail: user.email || "",
+            status: interestStatus,
+            note: shouldSaveNote ? cleanNote : existingRsvp?.note || "",
+            noteLocked: shouldSaveNote ? true : existingNoteLocked,
+            updatedAt: serverTimestamp(),
+            createdAt: existingRsvp?.createdAt || serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        transaction.update(pingRef, {
+          interestedCount: increment(interestedDelta),
+          maybeCount: increment(maybeDelta),
+          updatedAt: serverTimestamp(),
+        });
+      });
+
+      setSubmitted(true);
+
+      if (note.trim().length > 0) {
+        setNoteLocked(true);
+      }
+    } catch (error) {
+      console.error(error);
+      setErrorMessage("Could not save your RSVP. Please try again.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -30,7 +171,7 @@ export default function RsvpBox() {
       return "Thanks! Your response is now marked as maybe.";
     }
 
-    return "Your response has been saved for now.";
+    return "Your response has been saved.";
   }
 
   return (
@@ -41,6 +182,12 @@ export default function RsvpBox() {
         note.
       </p>
 
+      {!loading && !user && (
+        <div className="mt-3 rounded bg-yellow-100 p-3 text-sm text-yellow-800">
+          Please log in to RSVP or leave a note.
+        </div>
+      )}
+
       <div className="mt-3 space-y-2">
         <label className="flex items-center gap-2 rounded border bg-white p-3 text-sm">
           <input
@@ -48,10 +195,7 @@ export default function RsvpBox() {
             name="interestStatus"
             value="yes"
             checked={interestStatus === "yes"}
-            onChange={(event) => {
-              setInterestStatus(event.target.value);
-              setSubmitted(false);
-            }}
+            onChange={(event) => handleStatusChange(event.target.value)}
           />
           Yes, I’m interested
         </label>
@@ -62,10 +206,7 @@ export default function RsvpBox() {
             name="interestStatus"
             value="maybe"
             checked={interestStatus === "maybe"}
-            onChange={(event) => {
-              setInterestStatus(event.target.value);
-              setSubmitted(false);
-            }}
+            onChange={(event) => handleStatusChange(event.target.value)}
           />
           Maybe
         </label>
@@ -75,10 +216,11 @@ export default function RsvpBox() {
         <textarea
           value={note}
           maxLength={150}
-          disabled={noteLocked}
+          disabled={noteLocked || (!loading && !user)}
           onChange={(event) => {
             setNote(event.target.value);
             setSubmitted(false);
+            setErrorMessage("");
           }}
           placeholder="Optional note e.g. Do you have any TVs available?"
           className="min-h-24 w-full rounded border bg-white p-3 text-sm disabled:bg-gray-100 disabled:text-gray-500"
@@ -97,12 +239,23 @@ export default function RsvpBox() {
       <button
         type="button"
         onClick={handleSubmit}
-        className="mt-3 w-full rounded bg-green-500 px-4 py-3 font-semibold text-white"
+        disabled={saving}
+        className="mt-3 w-full rounded bg-green-500 px-4 py-3 font-semibold text-white disabled:opacity-60"
       >
-        {submitted ? "Update response" : "Submit response"}
+        {saving
+          ? "Saving..."
+          : submitted
+          ? "Update response"
+          : "Submit response"}
       </button>
 
-      {submitted && (
+      {errorMessage && (
+        <div className="mt-3 rounded bg-red-100 p-3 text-sm text-red-800">
+          {errorMessage}
+        </div>
+      )}
+
+      {submitted && !errorMessage && (
         <div className="mt-3 rounded bg-green-100 p-3 text-sm text-green-800">
           {getConfirmationMessage()}
         </div>
