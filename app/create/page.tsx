@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   addDoc,
   collection,
@@ -55,9 +55,65 @@ const emptyFormData: FormData = {
   lemonadeStand: false,
 };
 
+function normalizeDateForInput(dateValue: string) {
+  if (!dateValue) {
+    return "";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    return dateValue;
+  }
+
+  const parts = dateValue.split("/");
+
+  if (parts.length === 3) {
+    const [month, day, year] = parts;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  return "";
+}
+
+function openNativePicker(input: HTMLInputElement | null) {
+  if (!input) {
+    return;
+  }
+
+  input.focus();
+
+  const pickerInput = input as HTMLInputElement & {
+    showPicker?: () => void;
+  };
+
+  pickerInput.showPicker?.();
+}
+
+function getTomorrowDateString() {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const year = tomorrow.getFullYear();
+  const month = String(tomorrow.getMonth() + 1).padStart(2, "0");
+  const day = String(tomorrow.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function isEndTimeAfterStartTime(startTime: string, endTime: string) {
+  if (!startTime || !endTime) {
+    return false;
+  }
+
+  return endTime > startTime;
+}
+
 export default function CreatePage() {
   const router = useRouter();
   const { user, loading } = useAuth();
+
+  const dateInputRef = useRef<HTMLInputElement | null>(null);
+  const startTimeInputRef = useRef<HTMLInputElement | null>(null);
+  const endTimeInputRef = useRef<HTMLInputElement | null>(null);
 
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
@@ -110,7 +166,7 @@ export default function CreatePage() {
           title: data.title || "",
           town: data.town || "",
           addressArea: data.addressArea || "",
-          date: data.date || "",
+          date: normalizeDateForInput(data.date || ""),
           startTime: data.startTime || "",
           endTime: data.endTime || "",
           pingRadius: String(data.pingRadiusKm || ""),
@@ -205,6 +261,18 @@ export default function CreatePage() {
       setErrorMessage(
         "Please fill in all required details and select at least one category."
       );
+      setSubmitted(false);
+      return;
+    }
+
+    if (formData.date < getTomorrowDateString()) {
+      setErrorMessage("Please choose a sale date from tomorrow onwards.");
+      setSubmitted(false);
+      return;
+    }
+
+    if (!isEndTimeAfterStartTime(formData.startTime, formData.endTime)) {
+      setErrorMessage("End time must be later than start time.");
       setSubmitted(false);
       return;
     }
@@ -349,47 +417,127 @@ export default function CreatePage() {
             className="w-full rounded border p-3"
           />
 
-          <div>
+          <div className="rounded-lg border bg-gray-50 p-3">
             <label className="mb-1 block text-sm font-semibold">
               Sale date
             </label>
-            <input
-              type="text"
-              value={formData.date}
-              onChange={(event) => updateField("date", event.target.value)}
-              placeholder="MM/DD/YYYY"
-              className="w-full rounded border p-3"
-            />
+
+            <div className="relative">
+              <input
+                ref={dateInputRef}
+                type="date"
+                value={formData.date}
+                min={getTomorrowDateString()}
+                onChange={(event) => updateField("date", event.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-3 pr-12 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+              />
+
+              <button
+                type="button"
+                onClick={() => openNativePicker(dateInputRef.current)}
+                className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md bg-green-50 text-green-700"
+                aria-label="Open calendar"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M8 2v4" />
+                  <path d="M16 2v4" />
+                  <path d="M3 10h18" />
+                  <rect x="3" y="4" width="18" height="18" rx="2" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="mt-1 text-xs text-gray-500">
+              Tap the calendar icon to pick the sale date.
+            </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-sm font-semibold">
-                Start time
-              </label>
-              <input
-                type="time"
-                value={formData.startTime}
-                onChange={(event) =>
-                  updateField("startTime", event.target.value)
-                }
-                className="w-full rounded border p-3"
-              />
+          <div className="rounded-lg border bg-gray-50 p-3">
+            <p className="mb-2 text-sm font-semibold">Sale time</p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600">
+                  Start time
+                </label>
+
+                <div className="relative">
+                  <input
+                    ref={startTimeInputRef}
+                    type="time"
+                    value={formData.startTime}
+                    onChange={(event) =>
+                      updateField("startTime", event.target.value)
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-3 pr-10 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => openNativePicker(startTimeInputRef.current)}
+                    className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md bg-green-50 text-green-700"
+                    aria-label="Open start time picker"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 7v5l3 2" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600">
+                  End time
+                </label>
+
+                <div className="relative">
+                  <input
+                    ref={endTimeInputRef}
+                    type="time"
+                    value={formData.endTime}
+                    onChange={(event) =>
+                      updateField("endTime", event.target.value)
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-3 pr-10 text-sm shadow-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => openNativePicker(endTimeInputRef.current)}
+                    className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md bg-green-50 text-green-700"
+                    aria-label="Open end time picker"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 7v5l3 2" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div>
-              <label className="mb-1 block text-sm font-semibold">
-                End time
-              </label>
-              <input
-                type="time"
-                value={formData.endTime}
-                onChange={(event) =>
-                  updateField("endTime", event.target.value)
-                }
-                className="w-full rounded border p-3"
-              />
-            </div>
+            <p className="mt-2 text-xs text-gray-500">
+              Tap the clock icon to choose start and end times.
+            </p>
           </div>
 
           <div>

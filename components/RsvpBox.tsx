@@ -14,9 +14,67 @@ import { useAuth } from "@/lib/useAuth";
 
 type RsvpBoxProps = {
   pingId: string;
+  saleDate: string;
+  startTime: string;
+  rsvpCutoff: string;
 };
 
-export default function RsvpBox({ pingId }: RsvpBoxProps) {
+function getRsvpCutoffTime(
+  saleDate: string,
+  startTime: string,
+  rsvpCutoff: string
+) {
+  if (!saleDate || !startTime) {
+    return null;
+  }
+
+  const saleStart = new Date(`${saleDate}T${startTime}:00`);
+
+  if (Number.isNaN(saleStart.getTime())) {
+    return null;
+  }
+
+  const cutoffTime = new Date(saleStart);
+
+  if (rsvpCutoff === "6_hours") {
+    cutoffTime.setHours(cutoffTime.getHours() - 6);
+  }
+
+  if (rsvpCutoff === "12_hours") {
+    cutoffTime.setHours(cutoffTime.getHours() - 12);
+  }
+
+  if (rsvpCutoff === "24_hours") {
+    cutoffTime.setHours(cutoffTime.getHours() - 24);
+  }
+
+  if (rsvpCutoff === "48_hours") {
+    cutoffTime.setHours(cutoffTime.getHours() - 48);
+  }
+
+  return cutoffTime;
+}
+
+function formatCutoffMessage(cutoffTime: Date | null) {
+  if (!cutoffTime) {
+    return "RSVP availability could not be checked.";
+  }
+
+  return `RSVPs closed on ${cutoffTime.toLocaleDateString()} at ${cutoffTime.toLocaleTimeString(
+    [],
+    {
+      hour: "numeric",
+      minute: "2-digit",
+    }
+  )}.`;
+}
+
+export default function RsvpBox({
+  pingId,
+  saleDate,
+  startTime,
+  rsvpCutoff,
+}: RsvpBoxProps) {
   const router = useRouter();
   const { user, loading } = useAuth();
 
@@ -26,6 +84,9 @@ export default function RsvpBox({ pingId }: RsvpBoxProps) {
   const [noteLocked, setNoteLocked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  const cutoffTime = getRsvpCutoffTime(saleDate, startTime, rsvpCutoff);
+  const rsvpClosed = cutoffTime ? new Date() >= cutoffTime : false;
 
   useEffect(() => {
     async function loadExistingRsvp() {
@@ -67,6 +128,11 @@ export default function RsvpBox({ pingId }: RsvpBoxProps) {
       return;
     }
 
+    if (rsvpClosed) {
+      setErrorMessage("RSVPs are closed for this Yard Ping.");
+      return;
+    }
+
     setInterestStatus(value);
     setSubmitted(false);
     setErrorMessage("");
@@ -78,6 +144,11 @@ export default function RsvpBox({ pingId }: RsvpBoxProps) {
     }
 
     if (!user) {
+      return;
+    }
+
+    if (rsvpClosed) {
+      setErrorMessage("RSVPs are closed for this Yard Ping.");
       return;
     }
 
@@ -182,7 +253,13 @@ export default function RsvpBox({ pingId }: RsvpBoxProps) {
         note.
       </p>
 
-      {!loading && !user && (
+      {rsvpClosed && (
+        <div className="mt-3 rounded bg-red-100 p-3 text-sm text-red-800">
+          RSVPs are closed for this Yard Ping. {formatCutoffMessage(cutoffTime)}
+        </div>
+      )}
+
+      {!loading && !user && !rsvpClosed && (
         <div className="mt-3 rounded bg-yellow-100 p-3 text-sm text-yellow-800">
           Please log in to RSVP or leave a note.
         </div>
@@ -195,6 +272,7 @@ export default function RsvpBox({ pingId }: RsvpBoxProps) {
             name="interestStatus"
             value="yes"
             checked={interestStatus === "yes"}
+            disabled={rsvpClosed}
             onChange={(event) => handleStatusChange(event.target.value)}
           />
           Yes, I’m interested
@@ -206,6 +284,7 @@ export default function RsvpBox({ pingId }: RsvpBoxProps) {
             name="interestStatus"
             value="maybe"
             checked={interestStatus === "maybe"}
+            disabled={rsvpClosed}
             onChange={(event) => handleStatusChange(event.target.value)}
           />
           Maybe
@@ -216,7 +295,7 @@ export default function RsvpBox({ pingId }: RsvpBoxProps) {
         <textarea
           value={note}
           maxLength={150}
-          disabled={noteLocked || (!loading && !user)}
+          disabled={noteLocked || rsvpClosed || (!loading && !user)}
           onChange={(event) => {
             setNote(event.target.value);
             setSubmitted(false);
@@ -239,7 +318,7 @@ export default function RsvpBox({ pingId }: RsvpBoxProps) {
       <button
         type="button"
         onClick={handleSubmit}
-        disabled={saving}
+        disabled={saving || rsvpClosed}
         className="mt-3 w-full rounded bg-green-500 px-4 py-3 font-semibold text-white disabled:opacity-60"
       >
         {saving
@@ -255,7 +334,7 @@ export default function RsvpBox({ pingId }: RsvpBoxProps) {
         </div>
       )}
 
-      {submitted && !errorMessage && (
+      {submitted && !errorMessage && !rsvpClosed && (
         <div className="mt-3 rounded bg-green-100 p-3 text-sm text-green-800">
           {getConfirmationMessage()}
         </div>

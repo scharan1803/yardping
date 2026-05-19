@@ -254,7 +254,12 @@ export default function PingDetailsPage() {
             ))}
           </div>
 
-          <RsvpBox pingId={ping.id} />
+          <RsvpBox
+            pingId={ping.id}
+            saleDate={ping.date}
+            startTime={ping.startTime}
+            rsvpCutoff={ping.rsvpCutoff}
+          />
 
           <ShareButton />
         </section>
